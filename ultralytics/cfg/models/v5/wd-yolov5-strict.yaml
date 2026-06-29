@@ -1,0 +1,46 @@
+# Ultralytics YOLO configuration
+# WD-YOLO: NeXt backbone + FPN/PAN + dual attention for weld X-ray defect detection.
+# Designed to coexist with ELA-YOLO, EL-YOLOv8, MSAF-YOLO and SFW-YOLO.
+
+nc: 80
+scale: l
+scales:
+  # n: [0.33, 0.25, 1024]
+  # s: [0.33, 0.50, 1024]
+  m: [0.67, 0.75, 1024]
+  # l: [1.00, 1.00, 1024]
+  # x: [1.33, 1.25, 1024]
+
+backbone:
+  # [from, repeats, module, args]
+  # Stem: patchify/non-overlapping convolution + LayerNorm
+  - [-1, 1, WDStem, [96, 4, 4]]            # 0-P2/4 for 640 input: 160x160
+  # NeXt backbone stages. Each stage performs downsampling then NeXt-Conv blocks.
+  - [-1, 1, WDNeXtStage, [96, 3, True]]    # 1-P3/8
+  - [-1, 1, WDNeXtStage, [384, 3, True]]   # 2-P4/16
+  - [-1, 1, WDNeXtStage, [768, 3, True]]   # 3-P5/32
+  - [-1, 1, SPPF, [768, 5]]                # 4
+
+head:
+  # FPN top-down path
+  - [-1, 1, Conv, [384, 1, 1]]             # 5
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]
+  - [[-1, 2], 1, Concat, [1]]              # 7 cat C3/P4
+  - [-1, 3, C3, [384, False]]              # 8
+
+  - [-1, 1, Conv, [96, 1, 1]]              # 9
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]
+  - [[-1, 1], 1, Concat, [1]]              # 11 cat C2/P3
+  - [-1, 3, C3, [96, False]]               # 12 P3-small
+  - [-1, 1, WDBRA, [96]]                   # 13 small-object BRA attention
+
+  # PAN bottom-up path with CBAM for medium and large levels
+  - [-1, 1, Conv, [96, 3, 2]]              # 14
+  - [[-1, 9], 1, Concat, [1]]              # 15 cat FPN P4
+  - [-1, 3, C3_CBAM, [384, False]]         # 16 P4-medium
+
+  - [-1, 1, Conv, [384, 3, 2]]             # 17
+  - [[-1, 5], 1, Concat, [1]]              # 18 cat FPN P5
+  - [-1, 3, C3_CBAM, [768, False]]         # 19 P5-large
+
+  - [[13, 16, 19], 1, Detect, [nc]]        # Detect(P3, P4, P5)
